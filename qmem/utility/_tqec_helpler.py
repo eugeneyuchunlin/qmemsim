@@ -5,6 +5,18 @@ import webbrowser
 import os
 from dataclasses import dataclass
 
+
+@dataclass
+class Cube:
+    kind: CubeKind
+    pos: Position3D
+
+@dataclass
+class Pipe:
+    from_pos: Position3D
+    to_pos: Position3D
+
+
 def view_block_graph(block_graph: tqec.BlockGraph, filename="block_graph.html", **args):
     """View a BlockGraph as an HTML file in the default web browser.
 
@@ -108,16 +120,13 @@ def generate_cube_kinds(positions: list[Position3D], initial_kind: str=str("XZX"
     return cube_kinds
 
 
-def construct_3D_diagram(cubes_batches, ):
+def construct_3D_diagram(all_cubes: list[Cube], pipes_batches: list[list[Pipe]]) -> tqec.BlockGraph:
     bg = tqec.BlockGraph()
-    for batch in cubes_batches:
-        
-        for cube, kind in batch:
-            bg.add_cube(cube, ZXCube.from_str(''.join(kind)))
+    for cube in all_cubes:
+        bg.add_cube(cube.pos, cube.kind)
 
-        for i in range(1, len(batch)):
-            prev_cube, _ = batch[i - 1]
-            curr_cube, _ = batch[i]
-            bg.add_pipe(prev_cube, curr_cube)
+    for pipes in pipes_batches:
+        for pipe in pipes:
+            bg.add_pipe(pipe.from_pos, pipe.to_pos)
 
     return bg

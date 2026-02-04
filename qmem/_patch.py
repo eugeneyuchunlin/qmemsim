@@ -1,16 +1,12 @@
 import tqec
 from qmem.yoke._patch import Patch
-from qmem.utility import Vec2
+from qmem.utility import Vec2, Cube, Pipe
 from tqec.computation.block_graph import CubeKind, ZXCube
 from tqec.utils.position import Position3D
 from dataclasses import dataclass
 
 from ._patch_type import PatchType
 
-@dataclass
-class Cube:
-    kind: CubeKind
-    pos: Position3D
 
 class MemoryPatch(Patch):
 
@@ -79,6 +75,12 @@ class TqecMemoryPatch(MemoryPatch):
         # while not self.is_free_at_cycle(cycle):
         #     cycle += 1
         return cycle
+
+    def get_cubes(self) -> list[Cube]:
+        """
+        Get all cubes in this memory patch.
+        """
+        return [cube for cube in self._cycle_layer if cube is not None]
     
 
 if __name__ == "__main__":

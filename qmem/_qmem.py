@@ -3,7 +3,7 @@ from typing import Type
 from copy import deepcopy
 import tqec
 
-
+from qmem.utility import Cube, Pipe
 from ._operation import Operation, LoadOperation, StoreOperation, OperationType
 from .yoke import YokedSurfaceCode
 from .utility import Vec2, view_block_graph, construct_3D_diagram
@@ -50,7 +50,7 @@ class QMemory(YokedSurfaceCode):
               received from Vec2.get_position() as (x, y) or (col, row) directly.
         """
         self.maximum_cycles = maximum_cycles
-        self.memory_layout = memory_layout 
+        self.memory_layout = deepcopy(memory_layout)
         self.memory_layout_dimension = (len(memory_layout), len(memory_layout[0]) if len(memory_layout) > 0 else 0)
         self.access_hallway_layout = []
 
@@ -89,9 +89,9 @@ class QMemory(YokedSurfaceCode):
                 else: 
                     raise ValueError("Memory layout can only contain 0, 1, 2, and -1.")
 
-        self.path_generator = path_finding_algorithm(map=memory_layout)
-        self.controller = controller(memory_layout=memory_layout)
-        self.tqec_patches = [patch for layer in self.memory_storage for patch in layer] 
+        self.path_generator = path_finding_algorithm(map=self.memory_layout)
+        self.controller = controller(memory_layout=self.memory_layout)
+        self.tqec_patches : list[TqecMemoryPatch] = [patch for layer in self.memory_storage for patch in layer] 
         self.data_patches = [patch for patch in self.tqec_patches if patch.patch_type == PatchType.DATA]
         self.access_hallway_patches = [patch for patch in self.tqec_patches if patch.patch_type == PatchType.ACCESS_HALLWAY]
         self.outlet_patches = [patch for patch in self.tqec_patches if patch.patch_type == PatchType.OUTLET]
@@ -209,9 +209,9 @@ class QMemory(YokedSurfaceCode):
             print()
 
 
-    def run(self, instructions: dict[int, list[Instruction]]) -> list:
+    def run(self, instructions: dict[int, list[Instruction]]) -> list[list[Cube], list[list[Pipe]]]:
 
-        operation_cubes = []
+        all_pipes = []
         for cyl in instructions:
             ops = instructions[cyl]
             for op in ops:
@@ -232,22 +232,14 @@ class QMemory(YokedSurfaceCode):
                         cycle=cyl
                     )
                 else:
-                    # print(op.operation)
                     qubit_patches = None
                 
-                cubes = memory_operation.to_tqec_cubes() 
-                operation_cubes.append(cubes)
-                # view_block_graph(construct_3D_diagram(operation_cubes))
-        return operation_cubes
+                pipes = memory_operation.to_tqec_pipes() 
+                all_pipes.append(pipes)
 
-def plot_memory(qmem: QMemory, operation: Operation):
-    bg = tqec.BlockGraph()
-    pipes = []
-    nodes = []
-    for patch in  qmem.tqec_patches:
-        _cubes, _pipes = patch.to_tqec_cubes_and_pipes()
-        nodes.extend(_cubes)
-        pipes.extend(_pipes)
-    
-    for node in nodes:
-        bg.add_cube(node.position, node.cube_kind)
+        all_cubes = []
+        for patch in self.tqec_patches:
+            cubes = patch.get_cubes()
+            all_cubes.extend(cubes) 
+        
+        return all_cubes, all_pipes

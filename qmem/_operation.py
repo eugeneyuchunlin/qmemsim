@@ -6,7 +6,7 @@ from tqec.utils.position import Position3D
 
 
 from qmem._patch import TqecMemoryPatch
-from qmem.utility import Vec2, generate_cube_kinds
+from qmem.utility import Vec2, generate_cube_kinds, Cube, Pipe
 
 
 
@@ -21,7 +21,7 @@ class Operation(ABC):
     """
     
     @abstractmethod
-    def to_tqec_cubes(self) -> list[tuple[Position3D, CubeKind]]:
+    def to_tqec_pipes(self) -> list[tuple[Position3D, CubeKind]]:
         """
         Convert the operation to tqec cubes and pipes.
 
@@ -37,7 +37,7 @@ class InitializationOperation(Operation):
         self.patches = [patch for patch in patches if patch.patch_type == patch.patch_type.DATA]
         self.cycle = cycle
 
-    def to_tqec_cubes(self):
+    def to_tqec_pipes(self):
         # nodes = additional_nodes + [
         #     (Position3D(patch.pos.x, patch.pos.y, self.cycle), patch.cube_kind) for patch in self.patches
         # ]
@@ -65,7 +65,7 @@ class MoveOperation(Operation):
 
   
 
-    def to_tqec_cubes(self):
+    def to_tqec_pipes(self):
         """
         Convert the move operation to tqec cubes and pipes.
         The function iterates through each patch in the move sequence, adding cubes for each cycle and pipes between them.
@@ -116,9 +116,12 @@ class MoveOperation(Operation):
             patch = self.positions_patch_map[Vec2(pos.x, pos.y)]
             patch.set_cube_kind(pos.z, ZXCube.from_str("".join(ck)))
 
-        
+        # return the list of pipes
+        pipes = []
+        for i in range(len(positions) - 1):
+            pipes.append( Pipe(positions[i], positions[i + 1]) ) 
 
-        return list(zip(positions, cube_kinds))
+        return pipes
 
     def __repr__(self):
         return f"MoveOp@{self.cycle}: {self.patches}"
@@ -187,3 +190,11 @@ class IdleOperation(Operation):
             A tuple of empty list of cubes and list of pipes.
         """
         return super().to_tqec_cubes_and_pipes(joint, False)
+    
+
+class YokeOperation(Operation):
+    """
+    A yoke operation that connects a set of patches and 
+    """
+
+    pass
