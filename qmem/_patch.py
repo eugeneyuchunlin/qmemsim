@@ -65,6 +65,7 @@ class TqecMemoryPatch(MemoryPatch):
         Check if the memory unit is free at the given cycle.
         A memory unit is considered free at a cycle if it has no cube registered at that cycle.
         """
+        
         return self._cycle_layer[cycle] is None
     
     def next_available_cycle(self, start_cycle: int) -> int:

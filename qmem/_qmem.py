@@ -3,10 +3,9 @@ from typing import Type
 from copy import deepcopy
 import tqec
 
-from qmem.utility import Cube, Pipe
-from ._operation import Operation, LoadOperation, StoreOperation, OperationType
+from ._operation import Operation, LoadOperation, StoreOperation, OperationType, IdleOperation
 from .yoke import YokedSurfaceCode
-from .utility import Vec2, view_block_graph, construct_3D_diagram
+from .utility import Vec2, view_block_graph, construct_3D_diagram, Cube, Pipe
 from ._patch import TqecMemoryPatch
 from ._patch_type import PatchType
 from ._controller import Controller, SimpleController
@@ -154,7 +153,7 @@ class QMemory(YokedSurfaceCode):
         }
 
 
-    def load(self, q_id) -> list[TqecMemoryPatch, list[TqecMemoryPatch], TqecMemoryPatch]:
+    def load(self, q_id, cyl) -> LoadOperation:
         """
         Load the qubit at the given coordinate out of the memory.
         The load operation involves growing the patch to the access hallway and then shrinking it out.
@@ -162,6 +161,7 @@ class QMemory(YokedSurfaceCode):
         and the rest of the access hallway patches along the way to the exit point.
         Args:
             q_id: The identifier of the qubit to be loaded.
+            cyl: The cycle at which the load operation is performed.
         Returns:
             list[TqecMemoryPatch, list[TqecMemoryPatch], TqecMemoryPatch]: A list containing the qubit patch and the access hallway patches involved in the load operation.
         """
@@ -169,14 +169,16 @@ class QMemory(YokedSurfaceCode):
         coord = self.controller.get_mapping_coord(q_id)
         self.controller.unmap(q_id)
         from_patch, access_hallway_patches, to_patch = self.generate_path(coord_from=coord, coord_to=self.outlet_points) 
-        return {
-            "from_patch": from_patch,
-            "access_hallway_patches": access_hallway_patches,
-            "to_patch": to_patch,
-        }
+
+        return LoadOperation(
+            target_patch=from_patch,
+            access_hallway_patches=access_hallway_patches,
+            outlet_patch=to_patch,
+            cycle=cyl
+        )
     
 
-    def store(self, q_id) -> list[TqecMemoryPatch, list[TqecMemoryPatch], TqecMemoryPatch]:
+    def store(self, q_id, cyl) -> StoreOperation:
         """
         Store the qubit at the given coordinate into the memory.
         The store operation involves growing the patch from the access hallway to the target patch and then shrinking
@@ -187,20 +189,30 @@ class QMemory(YokedSurfaceCode):
         (It's actually the same as load operation but in reverse order.)
         Args:
             q_id: The identifier of the qubit to be stored.
+            cyl: The cycle at which the store operation is performed.
         Returns:
             list[TqecMemoryPatch, list[TqecMemoryPatch], TqecMemoryPatch]: A list containing the qubit patch and the access hallway patches involved in the store  
         """
 
-        coord_to = self.controller.map(q_id)
+        coord_to = self.controller.map(q_id, cyl)
         # print("Store to ", coord_to)
         # It was supposed to be from_patch, access_hallway, and to_patch, but since find the path in a reverse way so that we swap the orer of from and to.
         target_coord, access_hallway_patches, outlet_patch = self.generate_path(coord_from=coord_to, coord_to=self.outlet_points)
         access_hallway_patches.reverse()
-        return {
-            "from_patch": outlet_patch,
-            "access_hallway_patches": access_hallway_patches,
-            "to_patch": target_coord,
-        }
+
+        return StoreOperation(
+            target_patch=target_coord,
+            access_hallway_patches=access_hallway_patches,
+            outlet_patch=outlet_patch,
+            cycle=cyl
+        )
+    
+    def idle(self, q_id, cyl) -> IdleOperation:
+        coord = self.controller.get_mapping_coord(q_id)
+        patch = self.memory_storage[coord.y][coord.x]
+        return IdleOperation(
+            idling_patch=patch,
+            cycle=cyl)
     
     def view_memory(self):
         for layer in self.memory_storage:
@@ -211,31 +223,34 @@ class QMemory(YokedSurfaceCode):
 
     def run(self, instructions: dict[int, list[Instruction]]) -> list[list[Cube], list[list[Pipe]]]:
 
+
         all_pipes = []
         for cyl in instructions:
             ops = instructions[cyl]
+            qids = self.controller.get_in_memory_qids() 
+            print(f"Cycle {cyl} starting. In-memory q_ids: {qids}")
             for op in ops:
                 if op.operation == OperationType.LOAD:
-                    qubit_patches = self.load(op.q_id)
-                    memory_operation = LoadOperation(
-                        target_patch=qubit_patches["from_patch"],
-                        access_hallway_patches=qubit_patches["access_hallway_patches"],
-                        outlet_patch=qubit_patches["to_patch"],
-                        cycle=cyl
-                    )
+                    memory_operation = self.load(op.q_id, cyl)
                 elif op.operation == OperationType.STORE:
-                    qubit_patches = self.store(op.q_id)
-                    memory_operation = StoreOperation(
-                        target_patch=qubit_patches["to_patch"],
-                        access_hallway_patches=qubit_patches["access_hallway_patches"],
-                        outlet_patch=qubit_patches["from_patch"],
-                        cycle=cyl
-                    )
-                else:
+                    memory_operation = self.store(op.q_id, cyl)
+                elif op.operation == OperationType.YOKE:
                     qubit_patches = None
-                
+
+                cubes = memory_operation.run()
                 pipes = memory_operation.to_tqec_pipes() 
                 all_pipes.append(pipes)
+
+
+            qids = self.controller.get_in_memory_qids() 
+            for qid in qids:
+                idle_operation = self.idle(qid, cyl)
+                res = idle_operation.run()
+                if not res:
+                    continue
+                pipes = idle_operation.to_tqec_pipes()
+                all_pipes.append(pipes)
+            print(f"Cycle {cyl} completed. In-memory q_ids: {qids}")
 
         all_cubes = []
         for patch in self.tqec_patches:

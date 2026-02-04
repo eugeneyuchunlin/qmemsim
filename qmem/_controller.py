@@ -4,8 +4,14 @@ from qmem.utility import Vec2
 
 class Controller(ABC):
 
-    def __init__(self, memory_layout: list[list[int]], ):
+    def __init__(self, 
+                 memory_layout: list[list[int]], 
+                 maximum_cycles: int = 100
+                 ):
         self.memory_layout = memory_layout
+        self.maximum_cycles = maximum_cycles
+
+        self._3D_map = {}
         self.coord_to_qid = {}
         self.qid_to_coord = {}
 
@@ -13,6 +19,9 @@ class Controller(ABC):
             for x, cell in enumerate(row):
                 if cell == 0:  # Assuming 0 represents a valid memory cell
                     self.coord_to_qid[(x, y)] = None  # Initialize with no qubit assigned
+        
+        for i in range(self.maximum_cycles):
+            self._3D_map[i] = [[None for _ in range(len(memory_layout[0]))] for _ in range(len(memory_layout))]
 
 
     @abstractmethod
@@ -66,19 +75,27 @@ class Controller(ABC):
         return self.coord_to_qid[(coord.x, coord.y)]
 
     
-
+    def get_in_memory_qids(self) -> list[int]:
+        """
+        Get a list of all qubit identifiers currently mapped in memory.
+        Returns:
+            A list of qubit identifiers.
+        """
+        return [qid for qid in self.qid_to_coord if self.qid_to_coord[qid] is not None]
 
 
 class SimpleController(Controller):
 
-    def map(self, q_id) -> Vec2:
+    def map(self, q_id, cyl) -> Vec2:
         # find a free memory cell and assign the qubit to it
 
         for coord in self.coord_to_qid:
             # print("coord: ", coord, self.coord_to_qid[coord])
             if self.coord_to_qid[coord] is None:
+
                 self.coord_to_qid[coord] = q_id
                 self.qid_to_coord[q_id] = coord
+
                 return Vec2(*coord)
                 
         raise ValueError("No available memory cells to map the qubit.")

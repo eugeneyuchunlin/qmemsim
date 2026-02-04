@@ -5,4 +5,4 @@ from ._operation import OperationType
 @dataclass
 class Instruction:
     operation: OperationType
-    q_id: int
+    q_id: int | list[int]
