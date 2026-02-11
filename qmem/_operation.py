@@ -14,7 +14,8 @@ class OperationType(Enum):
     INIT = "INIT"
     STORE = "STORE"
     LOAD = "LOAD"
-    YOKE = "YOKE"
+    YOKE_ROW = "YOKE_ROW"
+    YOKE_COL = "YOKE_COL"
 
 class Operation(ABC):
     """
@@ -243,11 +244,78 @@ class IdleOperation(Operation):
             self.run()
 
         return self.pipes
-    
+
+class YokeOperationType(Enum):
+    YOKE_ROW = "YOKE_ROW"
+    YOKE_COL = "YOKE_COL" 
 
 class YokeOperation(Operation):
     """
     A yoke operation that connects a set of patches and 
     """
 
-    pass
+    def __init__(self, target_patches: list[TqecMemoryPatch], access_hallway_patches: list[TqecMemoryPatch], cycle: int, op_type: YokeOperationType):
+        super().__init__()
+
+        self.patches = target_patches
+        self.access_hallway_patches = access_hallway_patches
+        self.cycle = cycle
+        self.op_type = op_type
+
+        next_available_cycles = [patch.next_available_cycle(cycle) for patch in self.patches + self.access_hallway_patches]
+        max_next_available_cycle = max(next_available_cycles + [cycle])
+
+        self.cycle = max(self.cycle, max_next_available_cycle)
+        print(f"YokeOperation initialized at cycle {cycle}, but next available cycle for patches is {max_next_available_cycle}. Assigned at cycle {self.cycle} instead.")
+
+    def run(self):
+        cycle = self.cycle
+        # align all cube kinds at the cycle
+        # take the majority cube kind among the patches
+         
+
+        cube_kinds = [patch.get_cube_kind(cycle - 1) for patch in self.patches]
+        majority_kind = max(set(cube_kinds), key=cube_kinds.count)
+        print(f"Aligning cube kinds for YokeOperation at cycle {cycle}. Majority kind: {majority_kind}")
+
+        kind = list(majority_kind.as_tuple())
+
+        for patch in self.patches:
+            patch.add_a_cube(cycle, ZXCube(x=kind[0], y=kind[1], z=kind[2]))
+            self.positions.append(Position3D(patch.pos.x, patch.pos.y, cycle))
+            self.pipes.append(Pipe(Position3D(patch.pos.x, patch.pos.y, cycle-1), Position3D(patch.pos.x, patch.pos.y, cycle))) 
+         
+
+
+        kind[1] = kind[1].flipped()  # flip the y basis for the access hallway patches 
+        for patch in self.access_hallway_patches:
+            patch.add_a_cube(cycle, ZXCube(x=kind[0], y=kind[1], z=kind[2]))
+            self.positions.append(Position3D(patch.pos.x, patch.pos.y, cycle))
+            # self.pipes.append(Pipe(Position3D(patch.pos.x, patch.pos.y, cycle-1), Position3D(patch.pos.x, patch.pos.y, cycle)))
+
+        if self.op_type == YokeOperationType.YOKE_ROW:
+            row_df = self.patches[0].pos.y - self.access_hallway_patches[0].pos.y
+            for patch in self.patches:
+                self.pipes.append(Pipe(Position3D(patch.pos.x, patch.pos.y, cycle), Position3D(patch.pos.x, patch.pos.y - row_df, cycle)))
+        elif self.op_type == YokeOperationType.YOKE_COL:
+            col_df = self.patches[0].pos.x - self.access_hallway_patches[0].pos.x
+            for patch in self.patches:
+                self.pipes.append(Pipe(Position3D(patch.pos.x, patch.pos.y, cycle), Position3D(patch.pos.x - col_df, patch.pos.y, cycle)))
+
+        for i in range(len(self.access_hallway_patches) - 1):
+            curr_patch = self.access_hallway_patches[i]
+            next_patch = self.access_hallway_patches[i + 1]
+            self.pipes.append(Pipe(Position3D(curr_patch.pos.x, curr_patch.pos.y, cycle), Position3D(next_patch.pos.x, next_patch.pos.y, cycle)))
+
+        for patch in self.patches:
+            patch.add_a_cube(cycle + 1, ZXCube(x=kind[0], y=kind[1].flipped(), z=kind[2]))
+            self.positions.append(Position3D(patch.pos.x, patch.pos.y, cycle + 1))
+            self.pipes.append(Pipe(Position3D(patch.pos.x, patch.pos.y, cycle), Position3D(patch.pos.x, patch.pos.y, cycle + 1)))
+        
+        return self.positions
+
+
+
+    def to_tqec_pipes(self):
+        return self.pipes
+            

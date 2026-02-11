@@ -1,9 +1,10 @@
 
-from typing import Type
+from typing import Optional, Type
 from copy import deepcopy
+from requests import patch
 import tqec
 
-from ._operation import Operation, LoadOperation, StoreOperation, OperationType, IdleOperation
+from ._operation import Operation, LoadOperation, StoreOperation, OperationType, IdleOperation, YokeOperation, YokeOperationType
 from .yoke import YokedSurfaceCode
 from .utility import Vec2, view_block_graph, construct_3D_diagram, Cube, Pipe
 from ._patch import TqecMemoryPatch
@@ -11,6 +12,7 @@ from ._patch_type import PatchType
 from ._controller import Controller, SimpleController
 from ._path_generator import PathGenerator, BFSPathGenerator
 from ._instruction import Instruction
+from .exception import MemoryLayoutError
 
 
 
@@ -88,6 +90,8 @@ class QMemory(YokedSurfaceCode):
                 else: 
                     raise ValueError("Memory layout can only contain 0, 1, 2, and -1.")
 
+        self.width = self.memory_layout_dimension[1]
+        self.height = self.memory_layout_dimension[0]
         self.path_generator = path_finding_algorithm(map=self.memory_layout)
         self.controller = controller(memory_layout=self.memory_layout)
         self.tqec_patches : list[TqecMemoryPatch] = [patch for layer in self.memory_storage for patch in layer] 
@@ -213,7 +217,77 @@ class QMemory(YokedSurfaceCode):
         return IdleOperation(
             idling_patch=patch,
             cycle=cyl)
+
     
+    def __yoke(self, line: Vec2, cyl) -> Optional[YokeOperation]:
+        """
+        Unified method to handle both row and column yoke operations.
+        """
+        is_row = line.is_row()
+        is_col = line.is_col()
+        assert is_row or is_col, "Input must be either a row (x=None) or column (y=None)."
+        
+        limit = self.width if is_row else self.height
+
+        all_points = line.expand(range(limit))
+        occupied_patches = [
+            patch for patch in self.get_patches_at(all_points) 
+            if self.controller.mapping.get(patch.pos) is not None
+        ]
+
+        if not occupied_patches:
+            return None
+
+        pos = occupied_patches[0].pos
+        access_line = None
+
+        checks = [ (0, 1), (0, -1) ] if is_row else [ (1, 0), (-1, 0) ]
+        
+        for dx, dy in checks:
+            nx, ny = pos.x + dx, pos.y + dy
+            if 0 <= nx < self.width and 0 <= ny < self.height:
+                if self.memory_storage[ny][nx].patch_type == PatchType.ACCESS_HALLWAY:
+                    access_line = Vec2.row(ny) if is_row else Vec2.col(nx)
+                    break
+
+        if not access_line:
+            label = "row" if is_row else "column"
+            raise MemoryLayoutError(f"No access hallway found for the occupied patch in the {label}.")
+
+        return YokeOperation(
+            target_patches=occupied_patches,
+            access_hallway_patches=self.get_patches_at(list(access_line.expand(range(limit)))),
+            cycle=cyl,
+            op_type=YokeOperationType.YOKE_ROW if is_row else YokeOperationType.YOKE_COL
+        )
+
+    def yoke_row(self, row: Vec2, cyl):
+        return self.__yoke(row, cyl)
+
+    def yoke_col(self, col: Vec2, cyl):
+        return self.__yoke(col, cyl)
+
+
+    def _closest_access_hallway(self, coord: Vec2, points: list[Vec2]) -> list[int, Vec2]:
+        """
+        Calculate the Manhattan distance from the given coordinate to the nearest point in the list.
+        Args:
+            coord (Vec2): The coordinate to calculate the distance from.
+            points (list[Vec2]): The list of coordinates to calculate the distance to.
+        Returns:
+            int: The Manhattan distance to the nearest point.
+            Vec2: The coordinate of the nearest point.
+        """
+        min_distance = float('inf')
+        closest_access_hallway = None
+        for p in points:
+            distance = sum(abs(a - b) for a, b in zip(coord, p))
+            if distance < min_distance:
+                min_distance = distance
+                closest_access_hallway = p
+        return closest_access_hallway
+
+        
     def view_memory(self):
         for layer in self.memory_storage:
             for col in layer:
@@ -234,8 +308,25 @@ class QMemory(YokedSurfaceCode):
                     memory_operation = self.load(op.q_id, cyl)
                 elif op.operation == OperationType.STORE:
                     memory_operation = self.store(op.q_id, cyl)
-                elif op.operation == OperationType.YOKE:
-                    qubit_patches = None
+                elif op.operation == OperationType.YOKE_ROW or op.operation == OperationType.YOKE_COL:
+                    memory_operation = self.__yoke(op.pos, cyl)
+                    
+                    cycle = memory_operation.cycle
+                    if cycle > cyl:
+                        patches = memory_operation.patches
+                        for i in range(len(patches)):
+                            patch = patches[i]
+                            patch_id = self.controller.get_mapping_qid(patch.pos)
+                            if patch_id is not None:
+                                _cyl = cyl
+                                while _cyl < cycle:
+                                    idle_operation = self.idle(patch_id, _cyl)
+                                    res = idle_operation.run()
+                                    _cyl += 1
+                                    if not res:
+                                        continue
+                                    pipes = idle_operation.to_tqec_pipes()
+                                    all_pipes.append(pipes)
 
                 cubes = memory_operation.run()
                 pipes = memory_operation.to_tqec_pipes() 

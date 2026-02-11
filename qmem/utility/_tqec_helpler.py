@@ -1,5 +1,7 @@
+from pyparsing import Union
 import tqec
 from tqec.utils.position import Position3D
+from tqec.utils.enums import Basis
 from tqec.computation.block_graph import CubeKind, ZXCube
 import webbrowser
 import os
@@ -40,13 +42,19 @@ from enum import Enum
 from tqec.computation.block_graph import CubeKind
 from tqec.utils.position import Position3D
 
-def zx_flip(_type: str) -> str:
-    if _type == "Z":
-        return "X"
-    elif _type == "X":
-        return "Z"
+def zx_flip(_type: Union[str, Basis]) -> Union[str, Basis]:
+    if isinstance(_type, str):
+        try:
+            basis_obj = Basis(_type)
+        except ValueError:
+            raise ValueError(f"Invalid basis string: {_type}")
+    elif isinstance(_type, Basis):
+        basis_obj = _type
     else:
-        raise ValueError(f"Invalid cube kind type: {_type}")
+        raise TypeError(f"Expected str or Basis, got {type(_type)}")
+
+    flipped_basis = basis_obj.flipped()
+    return str(flipped_basis) if isinstance(_type, str) else flipped_basis
 
 class Dynamic(Enum):
     X = "X"
